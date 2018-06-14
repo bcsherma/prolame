@@ -336,7 +336,7 @@ def enforceRules():
 if __name__ == "__main__":
     # create the parser
     parser = argparse.ArgumentParser(description=__doc__.strip())
-    parser.add_argument("program", help="Program program", type=str)
+    parser.add_argument("program", help="prolame program to be run", type=str)
     parser.add_argument("--max", help="maximum integer", type=int, default=100)
     args = parser.parse_args()
 
