@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+prolame: A logic programming language for reasoning about natural numbers
+"""
+
+import pycosat
+import argparse
+import operator
+from parser import Program, parseProgram
+from itertools import combinations_with_replacement as cwr, permutations
+from functools import reduce
+
+
+def evaluate(expression, table):
+    """Recursively evaluate an arithmetic expression"""
+    if isinstance(expression, int):
+        return expression
+    elif isinstance(expression, str):
+        return table[expression]
+    else:
+        return Program.arithmetics[expression[1]](
+                evaluate(expression[0], table), evaluate(expression[2], table)
+            )
+
+
+def getFromDict(dataDict, mapList):
+    return reduce(operator.getitem, mapList, dataDict)
+
+
+def makeVariableTable(p, variableChain, depth):
+    """
+    Create a mapping from the domain to variables or from the domain to
+    itself depending on the depth of the mapping, i.e. the arity of the
+    predicate
+    """
+
+    if depth == 1:
+        ret = {}
+        for i in range(1, Program.max + 1):
+            # Get a variable for this variable predicate combination
+            nv = Program.next_var()
+            ret[i] = nv
+    
+            # Construct the string that the variable represents
+            old_params = ",".join(map(str, variableChain))
+            if old_params:
+                params = old_params + "," + str(i)
+            else:
+                params = str(nv)
+            Program.variableToStatement[nv] = f"{p}({params})"
+            
+        # Return this dictionary
+        return ret
+
+    else:
+        return {i: makeVariableTable(p, variableChain + [i], depth - 1)
+                for i in range(1, Program.max + 1)}
+
+def makeTables():
+    """
+    Initialize table mapping predicates to elements to variables and another
+    mapping variables to their meaning
+    """
+    # initialize dictionaries we will use to store the meaning of each variable
+    Program.predicateToVariable = {p: makeVariableTable(p, [], 
+                                                        Program.predicates[p])
+                                   for p in Program.predicates.keys()}
+
+
+def initializeFacts():
+    """Initialize a formula with the facts written as facts"""
+    # create an empty list of clauses
+    clauses = []
+
+    # add all facts as unit clauses
+    for sign, predicate, params in Program.facts:
+        parameters = [evaluate(p, {}) for p in params]
+        Program.clauses.append(
+            [sign*getFromDict(Program.predicateToVariable,
+                [predicate] + parameters)]
+        )
+
+    # return the formula
+    return clauses
+
+
+def getVarsFromExpr(expr):
+    """Get all the variables occuring in a single exression"""
+    if isinstance(expr, str):
+        return set([expr])
+    elif isinstance(expr, int):
+        return set()
+    elif len(expr) == 3:
+        return set(getVarsFromExpr(expr[0])) | set(getVarsFromExpr(expr[2]))
+    return set()
+
+
+def getVarsFromPredicate(predicate):
+    """Get all the variables occuring in a predicate"""
+    variables = set()
+    for param in predicate[2]:
+        variables = variables | getVarsFromExpr(param)
+    return variables
+
+
+def getVariableFromPredicate(predicate, table):
+    """
+    Get the boolean variable indicated by a predicate given an assignment 
+    of the numberic variables to integers
+    """
+    params = predicate[2]
+    values = [evaluate(p, table) for p in params]
+    return (predicate[0]
+            *getFromDict(Program.predicateToVariable[predicate[1]], values))
+
+
+def exprToString(expr):
+    if isinstance(expr, str):
+        return expr
+    elif isinstance(expr, int):
+        return str(expr)
+    else:
+        return exprToString(expr[0]) + expr[1] + exprToString(expr[2])
+
+
+def predToString(predicate):
+    """
+    Given a predicate triplet of sign, predicate, parameters, format them
+    as a string
+    """
+    sign, pred, params = predicate
+    return (("not " if sign < 0 else "") 
+            + f"{pred}({','.join(map(exprToString, params))})")
+
+
+def enforceRules():
+    """Enforce all rules over all relevant variables"""
+
+    # add all rules as implications
+    for consequent, antecedents in Program.rules:
+        
+        variables = getVarsFromPredicate(consequent)
+        for ant in antecedents:
+            variables = variables | getVarsFromPredicate(ant)
+        
+        for combos in cwr(range(1, Program.max + 1), len(variables)):
+            for values in permutations(combos):
+                try:
+                    table = {var: val for var, val in zip(variables, values)}
+                    cons = getVariableFromPredicate(consequent, table)
+                    ant = [-1*getVariableFromPredicate(a, table) 
+                           for a in antecedents]
+                    Program.clauses.append(ant + [cons])
+                except KeyError:
+                    # We tried to apply a rule for a value outside the max
+                    pass
+
+
+if __name__ == "__main__":
+    # create the parser
+    parser = argparse.ArgumentParser(description=__doc__.strip())
+    parser.add_argument("program", help="Program program", type=str)
+    parser.add_argument("--max", help="maximum integer", type=int, default=100)
+    args = parser.parse_args()
+
+    # read in the program
+    program = open(args.program).read()
+    Program.max = args.max
+    parseProgram(program)
+
+    # print some things about the program we parsed
+    print("declared predicates:")
+    for predicate, arity in Program.predicates.items():
+        print("\t", end="")
+        print(predicate, f"(arity-{arity})")
+    print()
+    
+    print("facts:")
+    for pred in Program.facts:
+        print("\t", end="")
+        print(predToString(pred))
+    print()
+          
+    print("rules:")
+    for consequent, antecedents in Program.rules:
+        print("\t", end="")
+        print(predToString(consequent), ":-", end=" ")
+        for ant in antecedents:
+            print(predToString(ant), end=" ")
+        print()
+    print()
+
+    makeTables()
+    initializeFacts()
+    enforceRules()
+
+    for pred, params in Program.queries:
+        print("query:", predToString((1, pred, params)), end=" ")
+        values = [evaluate(p, {}) for p in params]
+        variable = getFromDict(Program.predicateToVariable[pred], values)
+        
+        can_be_true = (0 if pycosat.solve(Program.clauses + [[variable]])
+                    == "UNSAT" else 1)
+        can_be_false = (0 if pycosat.solve(Program.clauses + [[-1*variable]])
+                        == "UNSAT" else 1)
+
+        if can_be_true and can_be_false:
+            print("undetermined")
+        elif can_be_true:
+            print("true")
+        else:
+            print("false")
