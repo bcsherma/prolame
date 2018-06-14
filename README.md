@@ -27,6 +27,6 @@ optional arguments:
 
 ## Getting Started
 
-Try running the programs in the `examples` directory. By default the maximum number considered by the interpreter is 50, but try seeing how the running time of each program changes when you pass different values of max to each program. You should see that the running time has a bottleneck of $max^{k}$ where $k$ is the maximum predicate arity in the program.
+Try running the programs in the `examples` directory. By default the maximum number considered by the interpreter is 50, but try seeing how the running time of each program changes when you pass different values of max to each program. You should see that the running time has a bottleneck of max^k, where k is the maximum predicate arity in the program.
 
 Once you understand the behavior of the example programs, try writing a program that defines a unary predicate `odd` and then proves that some numbers are either `odd` or `not odd`.
